@@ -1,6 +1,17 @@
 # Template for configuration
 
 http:
+  routers:
+    whoami:
+      rule: Host(`whoami.localhost`)
+      entryPoints: [web]
+      service: whoami
+      middlewares: [compress, rewrite-body]
+  services:
+    whoami:
+      loadBalancer:
+        servers:
+          - url: http://whoami
   middlewares:
     compress:
       compress:
@@ -21,7 +32,7 @@ http:
               - text/plain
             methods:
               - GET
-            checkMimeAccept: false
+            checkMimeAccept: true
             checkMimeContentType: true
             checkAcceptEncoding: true
             checkContentEncoding: true

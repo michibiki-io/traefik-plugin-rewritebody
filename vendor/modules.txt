@@ -1,4 +1,6 @@
-# github.com/andybalholm/brotli v1.1.0
-## explicit
+# github.com/andybalholm/brotli v1.1.1
+## explicit; go 1.13
 github.com/andybalholm/brotli
 github.com/andybalholm/brotli/matchfinder
+# github.com/xyproto/randomstring v1.2.0
+## explicit; go 1.17

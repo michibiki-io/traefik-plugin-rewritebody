@@ -1,0 +1,28 @@
+name: Release
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+  pull-requests: read
+
+jobs:
+  publish:
+    name: Publish plugin source
+    runs-on: ${{ vars.ACTIONS_RUNNER || 'ubuntu-24.04' }}
+    timeout-minutes: 10
+    concurrency:
+      group: release-main
+      queue: max
+    steps:
+      - name: Check out trusted release scripts
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: refs/heads/main
+          fetch-depth: 0
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 scripts/release/publish.py

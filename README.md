@@ -27,13 +27,33 @@ which is a fork of [Traefik](https://github.com/traefik)'s [plugin-rewritebody](
 
 ### Static
 
+Once a release is listed in the [Traefik Plugin Catalog](https://plugins.traefik.io/),
+you can load it by version. Use the tag of the release you want to install.
+
 ```yaml
 experimental:
-    plugins:
-        rewrite-body:
-            moduleName: "github.com/the-ccsn/traefik-plugin-rewritebody"
-            version: "v1.1.0"
+  plugins:
+    rewrite-body:
+      moduleName: github.com/michibiki-io/traefik-plugin-rewritebody
+      version: v0.1.0
 ```
+
+You can also load the tagged source as a local plugin. Download a source archive from
+[GitHub Releases](https://github.com/michibiki-io/traefik-plugin-rewritebody/releases)
+and extract it, including `vendor/`, into
+`./plugins-local/src/github.com/michibiki-io/traefik-plugin-rewritebody/`
+relative to Traefik's working directory. For a container deployment, mount
+that directory at the corresponding path inside the Traefik container.
+
+```yaml
+experimental:
+  localPlugins:
+    rewrite-body:
+      moduleName: github.com/michibiki-io/traefik-plugin-rewritebody
+```
+
+Restart Traefik after installing or upgrading the source. Traefik reads the
+plugin with Yaegi at startup.
 
 ### Dynamic
 
@@ -95,3 +115,33 @@ http:
         servers:
           - url: "http://127.0.0.1"
 ```
+
+## Development
+
+The repository uses Go 1.27.4. GitHub Actions builds and tests on native Linux
+AMD64 and ARM64 in Debian Trixie containers when commits are pushed to an open
+pull request. The development container and Traefik smoke-test containers also
+use Debian Trixie.
+
+```sh
+make build test
+make lint        # golangci-lint v2.15.0
+make yaegi_test  # Yaegi v0.16.3
+bash scripts/smoke-test.sh
+```
+
+The smoke test runs Traefik 3.7.19 and whoami 1.12.0 in Docker Compose and
+checks that Traefik rewrites the upstream response from `Name: bar` to
+`Name: foo`.
+
+Brotli is pinned at v1.1.1, the newest version compatible with Traefik
+3.7.19's Yaegi v0.16.3. Brotli v1.2.0 and later require the Go builtin
+`max`, which that interpreter cannot resolve (`undefined: max`). Keep the
+Yaegi and Traefik tests when upgrading Brotli.
+
+The release workflow checks pushes to `main` for an associated merged PR. It
+processes eligible PRs in the order they land on `main` and uses their original
+Conventional Commits to select versions and write release notes. The initial
+version is `v0.1.0`. GitHub provides the tagged plugin source as the release
+archive, and Traefik discovers releases from repositories with the
+[`traefik-plugin` topic](https://plugins.traefik.io/create).

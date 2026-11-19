@@ -1,9 +1,8 @@
 name: Release
 
 on:
-  pull_request_target:
+  push:
     branches: [main]
-    types: [closed]
 
 permissions:
   contents: write
@@ -12,7 +11,6 @@ permissions:
 jobs:
   publish:
     name: Publish plugin source
-    if: github.event.pull_request.merged == true
     runs-on: ${{ vars.ACTIONS_RUNNER || 'ubuntu-24.04' }}
     timeout-minutes: 10
     concurrency:
@@ -27,7 +25,4 @@ jobs:
       - name: Publish release
         env:
           GH_TOKEN: ${{ github.token }}
-          PR_NUMBER: ${{ github.event.number }}
-          MERGE_COMMIT: ${{ github.event.pull_request.merge_commit_sha }}
-          PR_COMMIT_COUNT: ${{ github.event.pull_request.commits }}
         run: python3 scripts/release/publish.py

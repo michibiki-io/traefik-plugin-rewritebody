@@ -33,14 +33,16 @@ jobs:
       - name: Build and test natively
         env:
           EXPECTED_ARCH: ${{ matrix.arch }}
+          EXPECTED_SHA: ${{ github.event.pull_request.head.sha }}
         run: |
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
+          test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
           test "$(go env GOHOSTARCH)" = "$EXPECTED_ARCH"
           test "$(go env GOARCH)" = "$EXPECTED_ARCH"
           make build test
       - name: Check module and vendor consistency
         if: matrix.arch == 'amd64'
         run: |
-          git config --global --add safe.directory "$GITHUB_WORKSPACE"
           go mod tidy
           make vendor
           git diff --exit-code -- go.mod go.sum vendor

@@ -139,7 +139,9 @@ Brotli is pinned at v1.1.1, the newest version compatible with Traefik
 `max`, which that interpreter cannot resolve (`undefined: max`). Keep the
 Yaegi and Traefik tests when upgrading Brotli.
 
-A merge into `main` runs the release workflow. It uses the merged PR's original
-Conventional Commits to select the version bump and to write release notes.
-The initial version is `v0.1.0`. GitHub provides the tagged plugin source as
-the release archive.
+The release workflow checks pushes to `main` for an associated merged PR. It
+processes eligible PRs in the order they land on `main` and uses their original
+Conventional Commits to select versions and write release notes. The initial
+version is `v0.1.0`. GitHub provides the tagged plugin source as the release
+archive, and Traefik discovers releases from repositories with the
+[`traefik-plugin` topic](https://plugins.traefik.io/create).

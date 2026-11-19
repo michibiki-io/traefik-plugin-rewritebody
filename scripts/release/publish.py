@@ -1,16 +1,31 @@
-"""Publish a tagged source release from a merged pull request's own commits."""
+"""Publish source releases for merged PRs in main's first-parent history."""
 
 import json
 import os
-from pathlib import Path
 import re
 import subprocess
+from pathlib import Path
 from tempfile import TemporaryDirectory
+from time import sleep
 
 
+WORKFLOW = ".github/workflows/release.yml"
 TAG = re.compile(r"v(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)")
-SUBJECT = re.compile(r"^([a-z]+)(?:\([^()\n]+\))?(!)?: .+")
+SUBJECT = re.compile(r"^([a-z]+)(?:\([^()\n]+\))?(!)?: .+", re.IGNORECASE)
 BREAKING = re.compile(r"^BREAKING[ -]CHANGES?: ", re.MULTILINE)
+COMMITS_QUERY = """
+query($owner: String!, $name: String!, $number: Int!, $endCursor: String) {
+  repository(owner: $owner, name: $name) {
+    pullRequest(number: $number) {
+      commits(first: 100, after: $endCursor) {
+        totalCount
+        nodes { commit { oid message } }
+        pageInfo { hasNextPage endCursor }
+      }
+    }
+  }
+}
+"""
 
 
 def output(*argv):
@@ -23,9 +38,9 @@ def version_for(messages, previous):
         subject = SUBJECT.fullmatch(message.split("\n", 1)[0])
         if BREAKING.search(message) or (subject and subject[2]):
             return (previous[0] + 1, 0, 0) if previous else (0, 1, 0)
-        if subject and subject[1] == "feat":
+        if subject and subject[1].lower() == "feat":
             bump = 2
-        elif subject and subject[1] in {"fix", "perf", "revert"}:
+        elif subject and subject[1].lower() in {"fix", "perf", "revert"}:
             bump = max(bump, 1)
     if not bump:
         return None
@@ -35,71 +50,130 @@ def version_for(messages, previous):
     return (major, minor + 1, 0) if bump == 2 else (major, minor, patch + 1)
 
 
-def versions_from(*options):
-    return {
-        tuple(map(int, match.groups()))
-        for tag in output("git", "tag", "--list", *options).splitlines()
-        if (match := TAG.fullmatch(tag))
-    }
-
-
 def format_tag(version):
     return "v" + ".".join(map(str, version))
 
 
-def main():
-    repo = os.environ["GITHUB_REPOSITORY"]
-    pr_number = int(os.environ["PR_NUMBER"])
-    merge_commit = os.environ["MERGE_COMMIT"]
-    if not re.fullmatch(r"[0-9a-f]{40}", merge_commit):
-        raise SystemExit("The merged PR must provide a full commit SHA.")
-    subprocess.run(["git", "merge-base", "--is-ancestor", merge_commit, "HEAD"], check=True)
+def release_tags():
+    return {
+        tuple(map(int, match.groups())): output("git", "rev-list", "-n", "1", f"refs/tags/{tag}")
+        for tag in output("git", "tag", "--list", "v*").splitlines()
+        if (match := TAG.fullmatch(tag))
+    }
 
-    existing = versions_from("--points-at", merge_commit)
-    if len(existing) > 1:
-        raise SystemExit("Multiple release tags already point to the merge commit.")
-    tag = format_tag(next(iter(existing))) if existing else None
-    if tag is not None:
-        if subprocess.run(["gh", "release", "view", tag, "--repo", repo],
-                          stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL).returncode == 0:
-            print(f"Release {tag} already exists.")
-            return
 
+def merged_pr(repo, commit_sha):
     pages = json.loads(output("gh", "api", "--paginate", "--slurp",
-                              f"repos/{repo}/pulls/{pr_number}/commits?per_page=100"))
-    commits = [commit for page in pages for commit in page]
-    if len(commits) != int(os.environ["PR_COMMIT_COUNT"]):
-        raise SystemExit("GitHub did not return the complete PR commit history.")
-    messages = [commit["commit"]["message"] for commit in commits]
-    if tag is None:
-        previous = max(versions_from("--merged", merge_commit), default=None)
-        version = version_for(messages, previous)
-        if version is None:
-            print("No releasable commit in the merged pull request.")
-            return
-        if version in versions_from():
-            raise SystemExit(f"Release tag {format_tag(version)} already exists on another commit.")
-        tag = format_tag(version)
+                              f"repos/{repo}/commits/{commit_sha}/pulls?per_page=100"))
+    matches = [
+        pr["number"]
+        for page in pages for pr in page
+        if pr["merged_at"] and pr["merge_commit_sha"] == commit_sha
+        and pr["base"]["ref"] == "main" and pr["base"]["repo"]["full_name"] == repo
+    ]
+    if len(matches) > 1:
+        raise SystemExit(f"Multiple merged PRs match {commit_sha}.")
+    return matches[0] if matches else None
+
+
+def pr_commits(repo, number):
+    owner, name = repo.split("/")
+    pages = json.loads(output("gh", "api", "graphql", "--paginate", "--slurp",
+                              "-f", f"query={COMMITS_QUERY}", "-f", f"owner={owner}",
+                              "-f", f"name={name}", "-F", f"number={number}"))
+    results = [page["data"]["repository"]["pullRequest"]["commits"] for page in pages]
+    commits = [node["commit"] for result in results for node in result["nodes"]]
+    if not results or len(commits) != results[-1]["totalCount"]:
+        raise SystemExit(f"GitHub did not return the complete history of PR #{number}.")
+    return commits
+
+
+def release_exists(repo, tag):
+    return subprocess.run(["gh", "release", "view", tag, "--repo", repo],
+                          stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL).returncode == 0
+
+
+def publish(repo, number, commit_sha, commits, version, tags):
+    tag = format_tag(version)
+    # Go's module proxy requires a /vN path when publishing major releases from v2.
+    modfile = output("git", "show", f"{commit_sha}:go.mod")
+    module = re.search(r"^module\s+(\S+)", modfile, re.MULTILINE)
+    if not module or (version[0] >= 2 and not module[1].endswith(f"/v{version[0]}")):
+        raise SystemExit(f"The Go module path does not support tag {tag}.")
+    if version in tags and tags[version] != commit_sha:
+        raise SystemExit(f"Release tag {tag} already exists on another commit.")
+    if version not in tags:
         subprocess.run([
             "git", "-c", "user.name=github-actions[bot]",
             "-c", "user.email=41898282+github-actions[bot]@users.noreply.github.com",
-            "tag", "--annotate", tag, "--message", f"Release {tag}", merge_commit,
+            "tag", "--annotate", tag, "--message", f"Release {tag}", commit_sha,
         ], check=True)
         subprocess.run(["git", "push", "origin", f"refs/tags/{tag}"], check=True)
+        tags[version] = commit_sha
 
-    notes = [f"Merged pull request: https://github.com/{repo}/pull/{pr_number}", "## Commits"]
-    for commit, message in zip(commits, messages, strict=True):
-        subject, _, body = message.partition("\n")
-        notes.append(f"- {subject} (`{commit['sha'][:12]}`)")
+    notes = [f"Merged pull request: https://github.com/{repo}/pull/{number}", "", "## Commits", ""]
+    for commit in commits:
+        subject, _, body = commit["message"].partition("\n")
+        notes.append(f"- {subject} (`{commit['oid'][:12]}`)")
         notes.extend(f"  {line}" for line in body.strip().splitlines())
     with TemporaryDirectory() as directory:
         path = Path(directory, "notes.md")
-        path.write_text("\n\n".join(notes[:2]) + "\n\n" + "\n".join(notes[2:]) + "\n",
-                        encoding="utf-8")
+        path.write_text("\n".join(notes) + "\n", encoding="utf-8")
         subprocess.run([
             "gh", "release", "create", tag, "--repo", repo, "--verify-tag",
             "--title", tag, "--notes-file", str(path),
         ], check=True)
+
+
+def main():
+    repo = os.environ["GITHUB_REPOSITORY"]
+    history = output("git", "rev-list", "--first-parent", "--reverse", "HEAD").splitlines()
+    trigger = os.environ["GITHUB_SHA"]
+    if trigger not in history:
+        raise SystemExit("The triggering commit is missing from main's first-parent history.")
+    # The push can arrive before GitHub indexes the updated PR association.
+    for delay in (0, 2, 4, 8):
+        sleep(delay)
+        trigger_pr = merged_pr(repo, trigger)
+        if trigger_pr is not None:
+            break
+    if trigger_pr is None:
+        print("The push does not identify a PR merged into main.")
+        return
+
+    tags = release_tags()
+    positions = {sha: index for index, sha in enumerate(history)}
+    previous = max((version for version, sha in tags.items() if sha in positions), default=None)
+    through = positions[trigger]
+    if previous is None:
+        introduced = output("git", "log", "-1", "--first-parent", "--diff-filter=A",
+                            "--format=%H", "HEAD", "--", WORKFLOW)
+        after = positions[introduced]
+    else:
+        last_tag_sha = tags[previous]
+        after = positions[last_tag_sha]
+        if through < after:
+            print("A later merge has already been released.")
+            return
+        # Recover when a prior job pushed its tag and then failed to create the Release.
+        if not release_exists(repo, format_tag(previous)):
+            number = merged_pr(repo, last_tag_sha)
+            if number is None:
+                raise SystemExit("The latest release tag has no merged PR.")
+            publish(repo, number, last_tag_sha, pr_commits(repo, number), previous, tags)
+        after += 1
+
+    for commit_sha in history[after:through + 1]:
+        number = trigger_pr if commit_sha == trigger else merged_pr(repo, commit_sha)
+        if number is None:
+            continue
+        commits = pr_commits(repo, number)
+        version = version_for([commit["message"] for commit in commits], previous)
+        if version is None:
+            print(f"No releasable commit in PR #{number}.")
+            continue
+        publish(repo, number, commit_sha, commits, version, tags)
+        previous = version
 
 
 if __name__ == "__main__":

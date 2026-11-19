@@ -22,7 +22,7 @@ A clear and concise description of what you expected to happen.
 A clear and concise description of what actually happened.
 
 **Logs**
-Any logs from your Treafik logs would be greatly appreciated!!
+Include the Traefik startup logs and any logs recorded while reproducing the issue.
 
 You can add the following to your Traefik config:
 ```yaml
@@ -30,10 +30,9 @@ log:
   level: DEBUG
 ```
 
-Then look for logs that end with:
-```console
-module=github.com/michibiki-io/traefik-plugin-rewritebody plugin=rewrite-body
-```
+Look for the `Loading plugins...` and `Plugins loaded.` messages at startup.
+Include the plugin name you configured and its module name
+(`github.com/michibiki-io/traefik-plugin-rewritebody`).
 
 **Server (please complete the following information):**
  - OS: [e.g. Docker, Ubuntu]

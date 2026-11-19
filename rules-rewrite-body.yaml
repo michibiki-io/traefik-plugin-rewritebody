@@ -32,7 +32,7 @@ http:
               - text/plain
             methods:
               - GET
-            checkMimeAccept: false
+            checkMimeAccept: true
             checkMimeContentType: true
             checkAcceptEncoding: true
             checkContentEncoding: true

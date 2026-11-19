@@ -40,6 +40,7 @@ jobs:
       - name: Check module and vendor consistency
         if: matrix.arch == 'amd64'
         run: |
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
           go mod tidy
           make vendor
           git diff --exit-code -- go.mod go.sum vendor

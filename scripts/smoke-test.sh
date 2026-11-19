@@ -15,5 +15,6 @@ trap cleanup EXIT
 "${compose[@]}" up --build --detach --wait
 endpoint=$("${compose[@]}" port traefik 80)
 response=$(curl --fail --silent --show-error --retry 15 --retry-all-errors \
-    --retry-delay 1 --max-time 5 --header 'Host: whoami.localhost' "http://$endpoint/")
+    --retry-delay 1 --max-time 5 --header 'Host: whoami.localhost' \
+    --header 'Accept: text/plain' "http://$endpoint/")
 grep -Fx 'Name: foo' <<< "$response"

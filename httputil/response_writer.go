@@ -9,8 +9,8 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/the-ccsn/traefik-plugin-rewritebody/compressutil"
-	"github.com/the-ccsn/traefik-plugin-rewritebody/logger"
+	"github.com/michibiki-io/traefik-plugin-rewritebody/compressutil"
+	"github.com/michibiki-io/traefik-plugin-rewritebody/logger"
 )
 
 // ResponseWrapper a wrapper used to simplify ResponseWriter data access and manipulation.
@@ -107,7 +107,7 @@ func (wrapper *ResponseWrapper) getHeader(headerName string) string {
 
 // LogHeaders writes current response headers.
 func (wrapper *ResponseWrapper) LogHeaders() {
-	wrapper.logWriter.LogDebugf("Error Headers: %v", wrapper.ResponseWriter.Header())
+	wrapper.logWriter.LogDebugf("Error Headers: %v", wrapper.Header())
 }
 
 // getContentEncoding get the Content-Encoding header value.
